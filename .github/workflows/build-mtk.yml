@@ -1,14 +1,11 @@
 name: Build mtkclient Windows EXE
-
-on:
-  workflow_dispatch:
+on: { workflow_dispatch: {} }
 
 jobs:
   build-mtk:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout mtkclient source
+      - name: Checkout mtkclient
         uses: actions/checkout@v4
         with:
           repository: bkerler/mtkclient
@@ -18,14 +15,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install build deps
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
 
-      - name: Build mtk.exe
-        run: pyinstaller --onefile --console mtk.py --name mtk
+      # 🧩 Bundle WinFsp DLLs into the exe
+      - name: Build mtk.exe (with WinFsp)
+        shell: pwsh
+        run: |
+          $bin = "mtkclient/Library/Filesystem/bin"
+          pyinstaller --onefile --console mtk.py --name mtk `
+            --add-binary "$bin/winfsp-x64.dll;$bin" `
+            --add-binary "$bin/winfsp-x86.dll;$bin"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
