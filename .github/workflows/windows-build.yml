@@ -1,0 +1,37 @@
+name: Build PhoenixR1 Flasher (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - 'PhoenixR1_Flasher.spec'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mtkclient pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller PhoenixR1_Flasher.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoenixR1_Flasher_win
+          path: dist/PhoenixR1_Flasher/**
