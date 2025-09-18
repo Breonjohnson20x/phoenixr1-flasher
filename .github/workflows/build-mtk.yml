@@ -21,14 +21,17 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
-      # 🧩 Bundle WinFsp DLLs into the exe
-      - name: Build mtk.exe (with WinFsp)
+      # Bundle *all* mtkclient binaries + usb backends (WinFsp + libusb)
+      - name: Build mtk.exe (fully bundled)
         shell: pwsh
         run: |
-          $bin = "mtkclient/Library/Filesystem/bin"
           pyinstaller --onefile --console mtk.py --name mtk `
-            --add-binary "$bin/winfsp-x64.dll;$bin" `
-            --add-binary "$bin/winfsp-x86.dll;$bin"
+            --collect-binaries mtkclient `
+            --collect-submodules mtkclient `
+            --hidden-import=fuse `
+            --add-binary "mtkclient/Library/Filesystem/bin/winfsp-x64.dll;mtkclient/Library/Filesystem/bin" `
+            --add-binary "mtkclient/Library/Filesystem/bin/winfsp-x86.dll;mtkclient/Library/Filesystem/bin" `
+            --add-binary "mtkclient/Library/Connection/bin/libusb-1.0.dll;mtkclient/Library/Connection/bin"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
