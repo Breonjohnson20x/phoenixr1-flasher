@@ -150,7 +150,7 @@ class RabbitHintLabel(QLabel):
         super().__init__(parent)
         self.setText("Phoenix Mode Enabled — Welcome to Wonderland.")
 
-        self.setStyleSheet(\"QLabel { background: rgba(20,20,20,220); padding: 8px; border-radius: 8px; font-size: 12px; }\")
+        self.setStyleSheet("QLabel { background: rgba(20,20,20,220); padding: 8px; border-radius: 8px; font-size: 12px; }")
         self.setWindowFlags(self.windowFlags() | Qt.ToolTip)
         self.setVisible(False)
         # opacity animation
