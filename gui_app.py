@@ -20,7 +20,7 @@ PHOENIX_ORANGE = "#ff7a18"
 
 
 # --------------------------
-# UI helpers (Easter Egg)
+# UI helpers (Easter Eggs)
 # --------------------------
 class OneClickButton(QPushButton):
     def __init__(self, *args, **kwargs):
@@ -62,6 +62,33 @@ class RabbitHintLabel(QLabel):
         self.setVisible(False)
 
 
+class RabbitFightOverlay(QLabel):
+    """Tiny two-rabbits fight animation pinned to bottom-right of the log panel."""
+    FRAMES = ["🐇  🐇", "🐇💥🐇", "🐇  🐇", "🐇💢🐇"]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._i = 0
+        self.setText(self.FRAMES[self._i])
+        self.setStyleSheet("QLabel { background: transparent; font-size: 14px; }")
+        self.setVisible(False)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.setInterval(400)
+
+    def _tick(self):
+        self._i = (self._i + 1) % len(self.FRAMES)
+        self.setText(self.FRAMES[self._i])
+
+    def start(self):
+        self.setVisible(True)
+        self.timer.start()
+
+    def stop(self):
+        self.timer.stop()
+        self.setVisible(False)
+
+
 # --------------------------
 # Log signal bus
 # --------------------------
@@ -85,11 +112,13 @@ class PhoenixApp(QWidget):
         self.logbus = LogBus()
         self.logbus.line.connect(self._append_line)
 
-        # user-selected firmware folder (None = auto)
-        self.fw_dir = None
+        # persisted settings
+        self.fw_dir = utils.get_fw_dir()
+        self.mtk_path = utils.get_mtk_path()
 
-        # Create Easter-egg label BEFORE UI build
+        # Easter-eggs
         self.rabbit_hint = RabbitHintLabel(self)
+        self.fight_overlay = None  # created after log widget exists
 
         self._build_ui()
         self._refresh_firmware_state()
@@ -125,11 +154,9 @@ class PhoenixApp(QWidget):
         # Status bar
         self.status = QStatusBar()
         self.device_label = QLabel("Device: Unknown")
-        self.mode_label = QLabel("")  # shows 3-file or 4-file
-        pill_css = (
-            "QLabel { background: #1f1f1f; color: #e6e6e6; border: 1px solid #2a2a2a; "
-            "border-radius: 10px; padding: 2px 8px; }"
-        )
+        self.mode_label = QLabel("")
+        pill_css = ("QLabel { background: #1f1f1f; color: #e6e6e6; border: 1px solid #2a2a2a; "
+                    "border-radius: 10px; padding: 2px 8px; }")
         self.mode_label.setStyleSheet(pill_css)
         self.status.addPermanentWidget(self.mode_label)
         self.status.addPermanentWidget(self.device_label)
@@ -140,6 +167,11 @@ class PhoenixApp(QWidget):
         layout.addWidget(self.log)
         layout.addWidget(self.status)
         self.setLayout(layout)
+
+        # Create fight overlay after log exists
+        self.fight_overlay = RabbitFightOverlay(self.log.viewport())
+        self._position_fight_overlay()
+        self.log.viewport().installEventFilter(self)
 
         # Dark theme
         self.setStyleSheet(f"""
@@ -181,6 +213,20 @@ class PhoenixApp(QWidget):
                 padding: 0 4px;
             }}
         """)
+
+    def eventFilter(self, obj, event):
+        # keep the bunnies pinned in the log's bottom-right corner as it resizes
+        if obj is self.log.viewport():
+            self._position_fight_overlay()
+        return super().eventFilter(obj, event)
+
+    def _position_fight_overlay(self):
+        if not self.fight_overlay:
+            return
+        vp = self.log.viewport()
+        x = vp.width() - self.fight_overlay.sizeHint().width() - 8
+        y = vp.height() - self.fight_overlay.sizeHint().height() - 6
+        self.fight_overlay.move(max(0, x), max(0, y))
 
     def _toolbar(self):
         self.btn_refresh = QPushButton("Refresh")
@@ -264,7 +310,11 @@ class PhoenixApp(QWidget):
         self.btn_wipe = QPushButton("Wipe userdata (DANGER)")
         self.btn_wipe.clicked.connect(self._run_tool_wipe)
 
-        for w in [self.btn_reset, self.btn_reboot_bl, self.btn_wipe]:
+        # NEW: Find mtk.exe…
+        self.btn_find_mtk = QPushButton("Find mtk.exe…")
+        self.btn_find_mtk.clicked.connect(self._choose_mtk_exe)
+
+        for w in [self.btn_reset, self.btn_reboot_bl, self.btn_wipe, self.btn_find_mtk]:
             lay.addWidget(w)
 
         tab.setLayout(lay)
@@ -306,10 +356,29 @@ class PhoenixApp(QWidget):
         d = QFileDialog.getExistingDirectory(self, "Select firmware folder", os.path.dirname(__file__))
         if d:
             self.fw_dir = d
+            utils.set_fw_dir(d)
             self._append_line(f"Using firmware folder: {d}", "ok")
         else:
             self._append_line("No folder selected. Falling back to defaults.", "warn")
         self._refresh_firmware_state()
+
+    def _choose_mtk_exe(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select mtk.exe", os.path.dirname(__file__), "Executable (*.exe);;All files (*.*)")
+        if path and os.path.isfile(path):
+            self.mtk_path = path
+            utils.set_mtk_path(path)
+            self._append_line(f"Using mtk.exe: {path}", "ok")
+        else:
+            self._append_line("mtk.exe not selected.", "warn")
+
+    def _ensure_mtk_on_path(self):
+        """Prepend chosen mtk.exe folder to PATH so mtk_wrapper finds it."""
+        if not self.mtk_path:
+            return
+        folder = os.path.dirname(self.mtk_path)
+        env = os.environ.get("PATH", "")
+        if folder not in env:
+            os.environ["PATH"] = folder + os.pathsep + env
 
     def _refresh_firmware_state(self):
         self.paths = utils.list_firmware_images(self.fw_dir)
@@ -332,7 +401,7 @@ class PhoenixApp(QWidget):
         self._append_line(f"super/system: {self.paths.get('super_or_system')}", "info")
         self._append_line(f"vendor: {self.paths.get('vendor')}", "info")
 
-        # enable/disable single flash buttons by availability
+        # buttons by availability
         self.btn_flash_boot.setEnabled(bool(self.paths.get("boot")))
         self.btn_flash_vbmeta.setEnabled(bool(self.paths.get("vbmeta")))
         self.btn_flash_super.setEnabled(bool(self.paths.get("super_or_system")))
@@ -346,9 +415,7 @@ class PhoenixApp(QWidget):
         skip_vendor = self.chk_threefile.isChecked()
 
         ready = (have_boot and have_vbm and have_super and (have_vendor or skip_vendor))
-        # reflect mode chip
         self.mode_label.setText("3-file" if skip_vendor else "4-file")
-        # disable vendor button if skipping
         if skip_vendor:
             self.btn_flash_vendor.setEnabled(False)
 
@@ -378,6 +445,12 @@ class PhoenixApp(QWidget):
                 "Community Mode",
                 "This is community-maintained software.\nUse at your own risk. Make sure you own the device and have the legal right to modify it."
             )
+            # turn on the fight overlay
+            if self.fight_overlay:
+                self.fight_overlay.start()
+        else:
+            if self.fight_overlay:
+                self.fight_overlay.stop()
 
     def _ensure_safe(self):
         if not self._is_device_connected():
@@ -386,6 +459,7 @@ class PhoenixApp(QWidget):
         return True
 
     def _worker(self, generator, done_cb=None):
+        self._ensure_mtk_on_path()  # ensure PATH contains chosen mtk.exe
         log_path = utils.log_filename()
         with open(log_path, "a", encoding="utf-8") as logf:
             for line in generator:
@@ -401,4 +475,113 @@ class PhoenixApp(QWidget):
         if done_cb:
             done_cb()
 
-    def _flash_single(self, key, image
+    def _flash_single(self, key, image_path):
+        if not self._ensure_safe():
+            return
+        if not image_path:
+            QMessageBox.warning(self, "Missing image", "Place the required image or choose its folder via 'Choose firmware folder…'.")
+            return
+
+        if key == "boot":
+            part = "boot"
+        elif key == "vbmeta":
+            part = "vbmeta"
+        elif key == "super_or_system":
+            base = os.path.basename(image_path).lower()
+            part = "super" if base.startswith("super") else "system"
+        else:
+            part = "vendor"
+
+        self._append_line(f"Flashing {part} from {os.path.basename(image_path)} …", "info")
+        t = threading.Thread(target=self._worker, args=(mtk.flash_partition(part, image_path),))
+        t.start()
+
+    def _one_click_restore(self):
+        if not self._ensure_safe():
+            return
+
+        if self.chk_wipe.isChecked():
+            confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
+                                           QMessageBox.Yes | QMessageBox.No)
+            if confirm != QMessageBox.Yes:
+                return
+
+        seq = []
+        if self.paths.get("vbmeta"):
+            seq.append(("vbmeta", self.paths["vbmeta"]))
+        if self.paths.get("boot"):
+            seq.append(("boot", self.paths["boot"]))
+        if self.paths.get("super_or_system"):
+            img = self.paths["super_or_system"]
+            base = os.path.basename(img).lower()
+            part = "super" if base.startswith("super") else "system"
+            seq.append((part, img))
+
+        skip_vendor = self.chk_threefile.isChecked()
+        if not skip_vendor and self.paths.get("vendor"):
+            seq.append(("vendor", self.paths["vendor"]))
+        elif skip_vendor:
+            self.logbus.line.emit("3-file mode: skipping vendor partition.", "warn")
+
+        def run_seq():
+            for part, img in seq:
+                self.logbus.line.emit(f"Flashing {part} …", "info")
+                for line in mtk.flash_partition(part, img):
+                    self.logbus.line.emit(line, "info")
+            if self.chk_wipe.isChecked():
+                self.logbus.line.emit("Erasing userdata …", "warn")
+                for line in mtk.wipe_userdata():
+                    self.logbus.line.emit(line, "info")
+            self.logbus.line.emit("Restore sequence complete.", "ok")
+
+        t = threading.Thread(target=self._worker, args=(run_seq(),))
+        t.start()
+
+    def _run_tool_reset(self):
+        if not self._ensure_safe():
+            return
+        self._append_line("Sending reset …", "warn")
+        t = threading.Thread(target=self._worker, args=(mtk.reset_device(),))
+        t.start()
+
+    def _run_tool_reboot_bl(self):
+        if not self._ensure_safe():
+            return
+        self._append_line("Rebooting (bootloader) …", "warn")
+        t = threading.Thread(target=self._worker, args=(mtk.reboot_to_bootloader(),))
+        t.start()
+
+    def _run_tool_wipe(self):
+        if not self._ensure_safe():
+            return
+        confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
+                                       QMessageBox.Yes | QMessageBox.No)
+        if confirm != QMessageBox.Yes:
+            return
+        self._append_line("Erasing userdata …", "warn")
+        t = threading.Thread(target=self._worker, args=(mtk.wipe_userdata(),))
+        t.start()
+
+    def _open_devmgmt(self):
+        ok, msg = mtk.open_device_manager()
+        self._append_line(msg, "ok" if ok else "err")
+
+    def _open_zadig(self):
+        ok, msg = mtk.open_zadig()
+        self._append_line(msg, "ok" if ok else "err")
+
+    def _refresh_all(self):
+        self._refresh_firmware_state()
+        self._refresh_device_state()
+        self._append_line("Refreshed firmware + device status.", "ok")
+
+
+def main():
+    app = QApplication(sys.argv)
+    w = PhoenixApp()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
