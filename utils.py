@@ -10,14 +10,17 @@ CONFIG_NAME = "phoenix_config.json"
 PHOENIX_FILENAMES = {
     "boot": ["boot.img", "boot_a.img", "boot.bin", "boot_a.bin"],
     "vbmeta": ["vbmeta.img", "vbmeta_a.img", "vbmeta.bin", "vbmeta_a.bin"],
+    # super OR system — accept either; prefer super if both exist
     "super_or_system": ["super.img", "super.bin", "system.img", "system.bin"],
     "vendor": [
         "vendor.img", "vendor.bin",
-        "vendor_boot.img", "vendor_boot.bin"  # last-resort only
+        # some dumps mislabel vendor as vendor_boot; last-resort only
+        "vendor_boot.img", "vendor_boot.bin",
     ],
 }
 
 def _app_dir() -> Path:
+    """Directory of the running app (works for PyInstaller .exe and plain Python)."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent
@@ -82,7 +85,7 @@ def list_firmware_images(preferred_dir: str | None = None) -> dict:
     Search order:
       1) preferred_dir (user chosen)
       2) <app>/firmware
-      3) <app>
+      3) <app> (same folder as the EXE)
     """
     paths = {"boot": None, "vbmeta": None, "super_or_system": None, "vendor": None}
     roots: list[Path] = []
@@ -96,12 +99,13 @@ def list_firmware_images(preferred_dir: str | None = None) -> dict:
         roots.append(fw)
     roots.append(appd)
 
+    # dedupe roots, keep order
     seen, ordered = set(), []
     for r in roots:
         rr = r.resolve()
         if rr not in seen:
             ordered.append(rr)
-        seen.add(rr)
+            seen.add(rr)
 
     for root in ordered:
         for key, names in PHOENIX_FILENAMES.items():
@@ -109,7 +113,7 @@ def list_firmware_images(preferred_dir: str | None = None) -> dict:
                 continue
             hit = _find_first(names, root)
             if hit:
-                # accept vendor_boot only if nothing else ever appears
+                # accept vendor_boot only if nothing else appears later
                 if key == "vendor" and Path(hit).name.lower().startswith("vendor_boot"):
                     paths[key] = paths[key] or hit
                 else:
