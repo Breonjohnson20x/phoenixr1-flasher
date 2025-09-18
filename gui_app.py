@@ -89,12 +89,12 @@ class PhoenixApp(QWidget):
         self.logbus = LogBus()
         self.logbus.line.connect(self._append_line)
 
+        # Create Easter-egg label BEFORE building the UI to avoid attribute errors
+        self.rabbit_hint = RabbitHintLabel(self)
+
         self._build_ui()
         self._refresh_firmware_state()
         self._refresh_device_state()
-
-        # Easter-egg hint label instance
-        self.rabbit_hint = RabbitHintLabel(self)
 
     # --------------------------
     # Build UI
@@ -200,8 +200,10 @@ class PhoenixApp(QWidget):
         l.addWidget(self.btn_oneclick)
         roww.setLayout(l)
 
-        # Link Easter-egg label to button
-        self.btn_oneclick.rabbit_label = self.rabbit_hint
+        # Link Easter-egg label to button (guarded)
+        hint = getattr(self, "rabbit_hint", None)
+        if hint:
+            self.btn_oneclick.rabbit_label = hint
 
         return roww
 
