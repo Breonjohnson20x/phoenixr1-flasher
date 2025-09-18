@@ -6,7 +6,6 @@ on:
     paths:
       - '**.py'
       - 'requirements.txt'
-      - 'PhoenixR1_Flasher.spec'
 
 jobs:
   build-windows:
@@ -24,11 +23,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mtkclient pyinstaller
+          pip install pyinstaller pyinstaller-hooks-contrib
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller PhoenixR1_Flasher.spec
+          pyinstaller ^
+            --onefile ^
+            --noconsole ^
+            --name PhoenixR1_Flasher ^
+            --icon assets\phoenix.ico ^
+            --collect-all PySide6 ^
+            --add-data "assets\phoenix.ico;assets" ^
+            --add-data "assets\phoenix.png;assets" ^
+            gui_app.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
