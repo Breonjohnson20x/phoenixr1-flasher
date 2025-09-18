@@ -4,7 +4,6 @@
 import os
 import sys
 import threading
-from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -30,7 +29,6 @@ class OneClickButton(QPushButton):
         self.rabbit_label = None
 
     def enterEvent(self, event):
-        # subtle pulse via temporary border color
         self._orig_style = self.styleSheet()
         self.setStyleSheet(self._orig_style + f" QPushButton{{ border: 1px solid {PHOENIX_ORANGE}; }}")
         if self.rabbit_label:
@@ -47,13 +45,11 @@ class OneClickButton(QPushButton):
 class RabbitHintLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Keep it plain UTF-8 (no escape sequences)
         self.setText("🐇🔥 Phoenix Mode Enabled — careful, legend says the rabbit likes surprises.")
         self.setStyleSheet("QLabel { background: rgba(20,20,20,220); padding: 8px; border-radius: 8px; font-size: 12px; }")
         self.setVisible(False)
 
     def show_rabbit_hint(self, anchor_btn: QPushButton):
-        # place near button (top-right offset)
         if anchor_btn:
             gpos = anchor_btn.mapToGlobal(anchor_btn.rect().topRight())
             parent = self.parent()
@@ -89,7 +85,10 @@ class PhoenixApp(QWidget):
         self.logbus = LogBus()
         self.logbus.line.connect(self._append_line)
 
-        # Create Easter-egg label BEFORE building the UI to avoid attribute errors
+        # user-selected firmware folder (None = auto)
+        self.fw_dir = None
+
+        # Create Easter-egg label BEFORE UI build
         self.rabbit_hint = RabbitHintLabel(self)
 
         self._build_ui()
@@ -121,13 +120,18 @@ class PhoenixApp(QWidget):
         # Log panel
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setStyleSheet(
-            "QTextEdit { background: #0f0f10; color: #ddd; font-family: Consolas, Menlo, monospace; }"
-        )
+        self.log.setStyleSheet("QTextEdit { background: #0f0f10; color: #ddd; font-family: Consolas, Menlo, monospace; }")
 
         # Status bar
         self.status = QStatusBar()
         self.device_label = QLabel("Device: Unknown")
+        self.mode_label = QLabel("")  # shows 3-file or 4-file
+        pill_css = (
+            "QLabel { background: #1f1f1f; color: #e6e6e6; border: 1px solid #2a2a2a; "
+            "border-radius: 10px; padding: 2px 8px; }"
+        )
+        self.mode_label.setStyleSheet(pill_css)
+        self.status.addPermanentWidget(self.mode_label)
         self.status.addPermanentWidget(self.device_label)
 
         layout = QVBoxLayout()
@@ -179,8 +183,6 @@ class PhoenixApp(QWidget):
         """)
 
     def _toolbar(self):
-        row = QHBoxLayout()
-
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self._refresh_all)
 
@@ -191,19 +193,21 @@ class PhoenixApp(QWidget):
         self.chk_community = QCheckBox("Community Mode")
         self.chk_community.stateChanged.connect(self._community_toggle)
 
+        self.chk_threefile = QCheckBox("3-file mode (skip vendor)")
+        self.chk_threefile.stateChanged.connect(self._refresh_firmware_state)
+
         roww = QWidget()
         l = QHBoxLayout()
         l.addWidget(self.btn_refresh)
         l.addStretch(1)
         l.addWidget(self.chk_wipe)
         l.addWidget(self.chk_community)
+        l.addWidget(self.chk_threefile)
         l.addWidget(self.btn_oneclick)
         roww.setLayout(l)
 
-        # Link Easter-egg label to button (guarded)
-        hint = getattr(self, "rabbit_hint", None)
-        if hint:
-            self.btn_oneclick.rabbit_label = hint
+        # Link Easter-egg to button
+        self.btn_oneclick.rabbit_label = self.rabbit_hint
 
         return roww
 
@@ -279,7 +283,7 @@ class PhoenixApp(QWidget):
         tab.setLayout(lay)
 
     # --------------------------
-    # Log appender (FIXED)
+    # Log appender
     # --------------------------
     def _append_line(self, text, level="info"):
         if not hasattr(self, "log"):
@@ -301,12 +305,14 @@ class PhoenixApp(QWidget):
     def _pick_firmware_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Select firmware folder", os.path.dirname(__file__))
         if d:
-            # Suggest copying into local firmware folder for auto-detect
-            self._append_line("Tip: Copy your images into the app's firmware/ folder for auto-detect.", "warn")
+            self.fw_dir = d
+            self._append_line(f"Using firmware folder: {d}", "ok")
+        else:
+            self._append_line("No folder selected. Falling back to defaults.", "warn")
         self._refresh_firmware_state()
 
     def _refresh_firmware_state(self):
-        self.paths = utils.list_firmware_images()
+        self.paths = utils.list_firmware_images(self.fw_dir)
 
         def mark(lbl, path):
             base = lbl.text().split(":")[0]
@@ -320,14 +326,32 @@ class PhoenixApp(QWidget):
         mark(self.lbl_super, self.paths.get("super_or_system"))
         mark(self.lbl_vendor, self.paths.get("vendor"))
 
-        # enable/disable buttons by availability
+        # log resolved paths
+        self._append_line(f"boot: {self.paths.get('boot')}", "info")
+        self._append_line(f"vbmeta: {self.paths.get('vbmeta')}", "info")
+        self._append_line(f"super/system: {self.paths.get('super_or_system')}", "info")
+        self._append_line(f"vendor: {self.paths.get('vendor')}", "info")
+
+        # enable/disable single flash buttons by availability
         self.btn_flash_boot.setEnabled(bool(self.paths.get("boot")))
         self.btn_flash_vbmeta.setEnabled(bool(self.paths.get("vbmeta")))
         self.btn_flash_super.setEnabled(bool(self.paths.get("super_or_system")))
         self.btn_flash_vendor.setEnabled(bool(self.paths.get("vendor")))
 
-        ready = all([self.paths.get("boot"), self.paths.get("vbmeta"),
-                     self.paths.get("super_or_system"), self.paths.get("vendor")])
+        # 3-file mode readiness
+        have_boot  = bool(self.paths.get("boot"))
+        have_vbm   = bool(self.paths.get("vbmeta"))
+        have_super = bool(self.paths.get("super_or_system"))
+        have_vendor = bool(self.paths.get("vendor"))
+        skip_vendor = self.chk_threefile.isChecked()
+
+        ready = (have_boot and have_vbm and have_super and (have_vendor or skip_vendor))
+        # reflect mode chip
+        self.mode_label.setText("3-file" if skip_vendor else "4-file")
+        # disable vendor button if skipping
+        if skip_vendor:
+            self.btn_flash_vendor.setEnabled(False)
+
         self.btn_oneclick.setEnabled(ready and self._is_device_connected())
 
     def _refresh_device_state(self):
@@ -341,7 +365,6 @@ class PhoenixApp(QWidget):
         ]:
             b.setEnabled(bool(b.isEnabled() and gate))
 
-        # One-Click depends on both images ready & device connected
         self.btn_oneclick.setEnabled(self.btn_oneclick.isEnabled() and gate)
 
     def _is_device_connected(self):
@@ -378,110 +401,4 @@ class PhoenixApp(QWidget):
         if done_cb:
             done_cb()
 
-    def _flash_single(self, key, image_path):
-        if not self._ensure_safe():
-            return
-        if not image_path:
-            QMessageBox.warning(self, "Missing image", "Place the required image in the firmware/ folder.")
-            return
-
-        # Decide partition name from key / filename
-        if key == "boot":
-            part = "boot"
-        elif key == "vbmeta":
-            part = "vbmeta"
-        elif key == "super_or_system":
-            base = os.path.basename(image_path).lower()
-            part = "super" if base.startswith("super") else "system"
-        else:
-            part = "vendor"
-
-        self._append_line(f"Flashing {part} from {os.path.basename(image_path)} …", "info")
-        t = threading.Thread(target=self._worker, args=(mtk.flash_partition(part, image_path),))
-        t.start()
-
-    def _one_click_restore(self):
-        if not self._ensure_safe():
-            return
-
-        if self.chk_wipe.isChecked():
-            confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
-                                           QMessageBox.Yes | QMessageBox.No)
-            if confirm != QMessageBox.Yes:
-                return
-
-        seq = []
-        if self.paths.get("vbmeta"):
-            seq.append(("vbmeta", self.paths["vbmeta"]))
-        if self.paths.get("boot"):
-            seq.append(("boot", self.paths["boot"]))
-        if self.paths.get("super_or_system"):
-            img = self.paths["super_or_system"]
-            base = os.path.basename(img).lower()
-            part = "super" if base.startswith("super") else "system"
-            seq.append((part, img))
-        if self.paths.get("vendor"):
-            seq.append(("vendor", self.paths["vendor"]))
-
-        def run_seq():
-            for part, img in seq:
-                self.logbus.line.emit(f"Flashing {part} …", "info")
-                for line in mtk.flash_partition(part, img):
-                    self.logbus.line.emit(line, "info")
-            if self.chk_wipe.isChecked():
-                self.logbus.line.emit("Erasing userdata …", "warn")
-                for line in mtk.wipe_userdata():
-                    self.logbus.line.emit(line, "info")
-            self.logbus.line.emit("Restore sequence complete.", "ok")
-
-        t = threading.Thread(target=self._worker, args=(run_seq(),))
-        t.start()
-
-    def _run_tool_reset(self):
-        if not self._ensure_safe():
-            return
-        self._append_line("Sending reset …", "warn")
-        t = threading.Thread(target=self._worker, args=(mtk.reset_device(),))
-        t.start()
-
-    def _run_tool_reboot_bl(self):
-        if not self._ensure_safe():
-            return
-        self._append_line("Rebooting (bootloader) …", "warn")
-        t = threading.Thread(target=self._worker, args=(mtk.reboot_to_bootloader(),))
-        t.start()
-
-    def _run_tool_wipe(self):
-        if not self._ensure_safe():
-            return
-        confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
-                                       QMessageBox.Yes | QMessageBox.No)
-        if confirm != QMessageBox.Yes:
-            return
-        self._append_line("Erasing userdata …", "warn")
-        t = threading.Thread(target=self._worker, args=(mtk.wipe_userdata(),))
-        t.start()
-
-    def _open_devmgmt(self):
-        ok, msg = mtk.open_device_manager()
-        self._append_line(msg, "ok" if ok else "err")
-
-    def _open_zadig(self):
-        ok, msg = mtk.open_zadig()
-        self._append_line(msg, "ok" if ok else "err")
-
-    def _refresh_all(self):
-        self._refresh_firmware_state()
-        self._refresh_device_state()
-        self._append_line("Refreshed firmware + device status.", "ok")
-
-
-def main():
-    app = QApplication(sys.argv)
-    w = PhoenixApp()
-    w.show()
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()
+    def _flash_single(self, key, image
