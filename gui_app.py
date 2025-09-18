@@ -63,7 +63,7 @@ class RabbitHintLabel(QLabel):
 
 
 class RabbitFightOverlay(QLabel):
-    """Tiny two-rabbits fight animation pinned to bottom-right of the log panel."""
+    """Tiny two-rabbits fight 'animation' pinned to bottom-right of the log panel."""
     FRAMES = ["🐇  🐇", "🐇💥🐇", "🐇  🐇", "🐇💢🐇"]
 
     def __init__(self, parent=None):
@@ -310,7 +310,7 @@ class PhoenixApp(QWidget):
         self.btn_wipe = QPushButton("Wipe userdata (DANGER)")
         self.btn_wipe.clicked.connect(self._run_tool_wipe)
 
-        # NEW: Find mtk.exe…
+        # Find mtk.exe…
         self.btn_find_mtk = QPushButton("Find mtk.exe…")
         self.btn_find_mtk.clicked.connect(self._choose_mtk_exe)
 
@@ -363,7 +363,9 @@ class PhoenixApp(QWidget):
         self._refresh_firmware_state()
 
     def _choose_mtk_exe(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select mtk.exe", os.path.dirname(__file__), "Executable (*.exe);;All files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select mtk.exe", os.path.dirname(__file__), "Executable (*.exe);;All files (*.*)"
+        )
         if path and os.path.isfile(path):
             self.mtk_path = path
             utils.set_mtk_path(path)
@@ -479,9 +481,14 @@ class PhoenixApp(QWidget):
         if not self._ensure_safe():
             return
         if not image_path:
-            QMessageBox.warning(self, "Missing image", "Place the required image or choose its folder via 'Choose firmware folder…'.")
+            QMessageBox.warning(
+                self,
+                "Missing image",
+                "Place the required image or choose its folder via 'Choose firmware folder…'."
+            )
             return
 
+        # Decide partition name from key / filename
         if key == "boot":
             part = "boot"
         elif key == "vbmeta":
@@ -501,8 +508,9 @@ class PhoenixApp(QWidget):
             return
 
         if self.chk_wipe.isChecked():
-            confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
-                                           QMessageBox.Yes | QMessageBox.No)
+            confirm = QMessageBox.question(
+                self, "Confirm wipe", "This will ERASE userdata. Continue?", QMessageBox.Yes | QMessageBox.No
+            )
             if confirm != QMessageBox.Yes:
                 return
 
@@ -554,8 +562,9 @@ class PhoenixApp(QWidget):
     def _run_tool_wipe(self):
         if not self._ensure_safe():
             return
-        confirm = QMessageBox.question(self, "Confirm wipe", "This will ERASE userdata. Continue?",
-                                       QMessageBox.Yes | QMessageBox.No)
+        confirm = QMessageBox.question(
+            self, "Confirm wipe", "This will ERASE userdata. Continue?", QMessageBox.Yes | QMessageBox.No
+        )
         if confirm != QMessageBox.Yes:
             return
         self._append_line("Erasing userdata …", "warn")
