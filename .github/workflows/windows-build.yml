@@ -6,10 +6,12 @@ on:
     paths:
       - '**.py'
       - 'requirements.txt'
+      - '.github/workflows/windows-build.yml'
 
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,17 +27,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
 
+      # NOTE: one-line command (PowerShell safe). No ^ characters.
       - name: Build with PyInstaller
-        run: |
-          pyinstaller ^
-            --onefile ^
-            --noconsole ^
-            --name PhoenixR1_Flasher ^
-            --icon assets\phoenix.ico ^
-            --collect-all PySide6 ^
-            --add-data "assets\phoenix.ico;assets" ^
-            --add-data "assets\phoenix.png;assets" ^
-            gui_app.py
+        run: pyinstaller --onefile --noconsole --name PhoenixR1_Flasher --icon assets\phoenix.ico --collect-all PySide6 --add-data "assets\phoenix.ico;assets" --add-data "assets\phoenix.png;assets" gui_app.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
