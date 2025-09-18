@@ -1,0 +1,34 @@
+name: Build mtkclient Windows EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mtk:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout mtkclient source
+        uses: actions/checkout@v4
+        with:
+          repository: bkerler/mtkclient
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build mtk.exe
+        run: pyinstaller --onefile --console mtk.py --name mtk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtk_win
+          path: dist/mtk.exe
