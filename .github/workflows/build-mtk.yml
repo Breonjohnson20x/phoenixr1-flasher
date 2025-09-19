@@ -8,31 +8,37 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1) Pull upstream mtkclient sources that we freeze
+      # (1) Checkout upstream mtkclient sources to freeze
       - name: Checkout mtkclient
         uses: actions/checkout@v4
         with:
           repository: bkerler/mtkclient
 
-      # 2) Python 3.11
+      # (2) Also checkout THIS repo (to grab your libusb DLL you uploaded)
+      - name: Checkout this repo (for assets)
+        uses: actions/checkout@v4
+        with:
+          path: self
+
+      # (3) Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3) Deps for building
+      # (4) Deps for building
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
 
-      # 4) Install WinFSP on the runner (needed by fuse)
+      # (5) Install WinFSP on runner (needed by fuse)
       - name: Install WinFSP (for FUSE)
         shell: pwsh
         run: choco install winfsp -y
 
-      # 5) Find the actual WinFSP DLL path (x64, path can vary)
+      # (6) Find the WinFSP DLL path (x64) on the runner
       - name: Locate WinFSP DLL path
         id: winfsp
         shell: pwsh
@@ -49,7 +55,18 @@ jobs:
           }
           throw "winfsp-x64.dll not found after choco install"
 
-      # 6) Build the single-file mtk.exe (bundle DLLs automatically)
+      # (7) Copy your known-good libusb into the mtkclient tree we freeze
+      #     EXPECTED SOURCE in your repo: self\mtkclient\Library\Connection\bin\libusb-1.0.dll
+      #     If yours sits elsewhere, change $src to that path.
+      - name: Copy libusb into mtkclient
+        shell: pwsh
+        run: |
+          $src = "$(Join-Path $env:GITHUB_WORKSPACE 'self\mtkclient\Library\Connection\bin\libusb-1.0.dll')"
+          if (!(Test-Path $src)) { throw "libusb-1.0.dll not found at $src" }
+          New-Item -ItemType Directory -Force -Path "mtkclient\Library\Connection\bin" | Out-Null
+          Copy-Item $src "mtkclient\Library\Connection\bin\libusb-1.0.dll" -Force
+
+      # (8) Build single-file mtk.exe and BUNDLE both DLLs.
       - name: Build mtk.exe (fully bundled)
         shell: pwsh
         run: |
@@ -57,9 +74,10 @@ jobs:
             --collect-binaries mtkclient `
             --collect-submodules mtkclient `
             --add-binary "${{ steps.winfsp.outputs.path }};mtkclient/Library/Filesystem/bin" `
+            --add-binary "mtkclient/Library/Connection/bin/libusb-1.0.dll;mtkclient/Library/Connection/bin" `
             --hidden-import=fuse
 
-      # 7) Publish the exe
+      # (9) Publish artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
