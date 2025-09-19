@@ -28,10 +28,7 @@ jobs:
             --collect-binaries mtkclient `
             --collect-submodules mtkclient `
             --hidden-import=fuse `
-            --add-binary "mtkclient/Library/Filesystem/bin/winfsp-x64.dll;mtkclient/Library/Filesystem/bin" `
-            --add-binary "mtkclient/Library/Filesystem/bin/winfsp-x86.dll;mtkclient/Library/Filesystem/bin" `
-            --add-binary "mtkclient/Library/Connection/bin/libusb-1.0.dll;mtkclient/Library/Connection/bin"
-
+            
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
